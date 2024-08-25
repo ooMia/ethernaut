@@ -12,6 +12,7 @@ import {Ethernaut} from "src/Ethernaut.sol";
 import {ERC20} from "openzeppelin-contracts-08/token/ERC20/ERC20.sol";
 
 import {console} from "forge-std/console.sol";
+
 contract TestStake is Test, Utils {
     Ethernaut ethernaut;
     Stake instance;
@@ -57,7 +58,7 @@ contract TestStake is Test, Utils {
     function testSolve() public {
         vm.deal(player, 1 ether);
         vm.startPrank(player);
-    
+
         StakeAttack attacker = new StakeAttack();
         attacker.attack{value: 0.001 ether + 2}(instance);
 
